@@ -8,6 +8,7 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
 </head>
 <body class="server-dashboard-body">
     <nav class="dashboard-nav">
@@ -16,10 +17,10 @@
             <span>GPU Monitor</span>
         </div>
         <div class="nav-actions">
-            <!-- <a href="{{ url_for('logout') }}" class="logout-button">
-                <i class="fas fa-sign-out-alt"></i>
-                <span>Logout</span>
-            </a> -->
+            <a href="{{ url_for('download_csvs') }}" class="btn btn-csv-download-nav">
+                <i class="fas fa-download"></i>
+                CSVs
+            </a>
             <a href="{{ url_for('user_utilization') }}" class="btn btn-primary">
                 <i class="fas fa-users"></i>
                 User Utilization
@@ -45,6 +46,11 @@
                     <option value="weekly">Last Week</option>
                     <option value="monthly">Last Month</option>
                 </select>
+            </div>
+            <div class="custom-date-range">
+                <input type="date" id="customStartDate">
+                <input type="date" id="customEndDate">
+                <button onclick="fetchCustomDateRange()">Apply</button>
             </div>
             <div class="refresh-info" id="refreshInfo">
                 <i class="fas fa-sync-alt"></i>
@@ -77,7 +83,36 @@
     </div>
 
     <script>
-        // Add this before the fetchGpuStats function
+        // Chart.js global defaults
+        Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+        Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color');
+        Chart.defaults.font.family = "'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif";
+
+        // Common zoom options for all charts
+        const zoomOptions = {
+            pan: {
+                enabled: true,
+                mode: 'x',
+                modifierKey: 'ctrl',
+            },
+            zoom: {
+                wheel: {
+                    enabled: true,
+                    modifierKey: 'ctrl',
+                },
+                pinch: {
+                    enabled: true
+                },
+                mode: 'x',
+                drag: {
+                    enabled: true,
+                    backgroundColor: 'rgba(var(--primary-rgb), 0.1)',
+                    borderColor: 'rgba(var(--primary-rgb), 0.3)',
+                    borderWidth: 1
+                }
+            }
+        };
+
         function createGpuCards(gpuIndex, gpuName) {
             const cardHTML = `
                 <div class="gpu-section" data-gpu="${gpuIndex}">
@@ -109,7 +144,7 @@
                         <div class="stats-card">
                             <div class="card-header">
                                 <h3><i class="fas fa-thermometer-half"></i> Temperature</h3>
-                                <span class="current-value">0°C</span>
+                                <span class="current-value">0&deg;C</span>
                             </div>
                             <div class="chart-container">
                                 <canvas id="temperatureChart${gpuIndex}"></canvas>
@@ -121,9 +156,60 @@
             return cardHTML;
         }
 
-        // Initialize charts for a GPU
         function initializeCharts(gpuIndex) {
             const charts = {};
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 0
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    },
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 8,
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    zoom: zoomOptions
+                }
+            };
+            
+            // Memory chart specific options
+            const memoryOptions = {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    y: {
+                        beginAtZero: true,
+                        max: 25000,
+                        title: {
+                            display: true,
+                            text: 'Memory (MiB)'
+                        }
+                    }
+                },
+                plugins: {
+                    ...commonOptions.plugins,
+                    zoom: zoomOptions
+                }
+            };
+            
+            // Add background color options for download
+            const downloadOptions = {
+                backgroundColor: 'white',
+                padding: 20
+            };
             
             charts.utilization = new Chart(document.getElementById(`gpuUtilizationChart${gpuIndex}`).getContext('2d'), {
                 type: 'line',
@@ -138,19 +224,7 @@
                         fill: true
                     }]
                 },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100
-                        }
-                    },
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: {
-                        duration: 0
-                    }
-                }
+                options: commonOptions
             });
 
             charts.memory = new Chart(document.getElementById(`memoryUtilizationChart${gpuIndex}`).getContext('2d'), {
@@ -158,7 +232,7 @@
                 data: {
                     labels: Array(10).fill(''),
                     datasets: [{
-                        label: `GPU ${gpuIndex} Memory (%)`,
+                        label: `GPU ${gpuIndex} Memory (MiB)`,
                         data: Array(10).fill(0),
                         borderColor: 'rgba(192, 75, 75, 1)',
                         backgroundColor: 'rgba(192, 75, 75, 0.2)',
@@ -166,19 +240,7 @@
                         fill: true
                     }]
                 },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100
-                        }
-                    },
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: {
-                        duration: 0
-                    }
-                }
+                options: memoryOptions
             });
 
             charts.temperature = new Chart(document.getElementById(`temperatureChart${gpuIndex}`).getContext('2d'), {
@@ -186,7 +248,7 @@
                 data: {
                     labels: Array(10).fill(''),
                     datasets: [{
-                        label: `GPU ${gpuIndex} Temperature (°C)`,
+                        label: `GPU ${gpuIndex} Temperature (&deg;C)`,
                         data: Array(10).fill(0),
                         borderColor: 'rgba(255, 206, 86, 1)',
                         backgroundColor: 'rgba(255, 206, 86, 0.2)',
@@ -194,20 +256,13 @@
                         fill: true
                     }]
                 },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100
-                        }
-                    },
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: {
-                        duration: 0
-                    }
-                }
+                options: commonOptions
             });
+
+            // Store download options with each chart
+            charts.utilization.downloadOptions = downloadOptions;
+            charts.memory.downloadOptions = downloadOptions;
+            charts.temperature.downloadOptions = downloadOptions;
 
             return charts;
         }
@@ -222,63 +277,109 @@
             const selectedRange = document.getElementById('timeRange').value;
             currentMode = selectedRange;
             
-            // Clear existing interval if any
             if (updateInterval) {
                 clearInterval(updateInterval);
             }
 
-            // Update refresh info text
             const refreshInfo = document.getElementById('refreshInfo');
             if (selectedRange === 'live') {
-                refreshInfo.innerHTML = '<i class="fas fa-sync-alt"></i><span>Auto-refreshing every 2s</span>';
-                // Start live updates
-                fetchGpuStats();
-                updateInterval = setInterval(fetchGpuStats, 2000);
+                // Reload the page when Live Monitoring is selected
+                window.location.reload();
             } else {
                 refreshInfo.innerHTML = '<i class="fas fa-history"></i><span>Historical Data</span>';
-                // Fetch historical data
                 await fetchHistoricalData(selectedRange);
             }
         }
 
+        // Function to format timestamp for display
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp.replace(' ', 'T'));
+            return date.toLocaleTimeString();
+        }
+
         // Function to fetch historical data
-        async function fetchHistoricalData(timeRange) {
+        async function fetchHistoricalData(timeRange, startDate, endDate) {
+            let url = `/api/historical_gpu_stats?range=${timeRange}`;
+            if (timeRange === 'custom' && startDate && endDate) {
+                url += `&start_date=${startDate}&end_date=${endDate}`;
+            }
             try {
-                const response = await fetch(`/api/historical_gpu_stats?range=${timeRange}`);
+                const response = await fetch(url);
                 const data = await response.json();
 
                 if (response.ok) {
                     const container = document.getElementById('gpuStatsContainer');
                     
-                    // Initialize cards for new GPUs
                     data.forEach(gpu => {
                         if (!document.querySelector(`[data-gpu="${gpu.index}"]`)) {
                             container.insertAdjacentHTML('beforeend', createGpuCards(gpu.index, gpu.name));
                             gpuCharts[gpu.index] = initializeCharts(gpu.index);
+                            addChartControls();
                         }
-                    });
 
-                    // Update charts with historical data
-                    data.forEach(gpu => {
                         const charts = gpuCharts[gpu.index];
                         const section = document.querySelector(`[data-gpu="${gpu.index}"]`);
                         
-                        // Update current values with latest data
-                        const currentValues = section.querySelectorAll('.current-value');
+                        // Format timestamps for display
+                        const formattedTimestamps = gpu.timestamps.map(ts => {
+                            const date = new Date(ts.replace(' ', 'T'));
+                            if (timeRange === 'daily') {
+                                return date.toLocaleTimeString();
+                            } else {
+                                return date.toLocaleString();
+                            }
+                        });
+
+                        // Get the latest values for current display
                         const lastUtilization = gpu.utilization[gpu.utilization.length - 1] || 0;
                         const lastMemory = gpu.memory[gpu.memory.length - 1] || 0;
                         
+                        // Update current values
+                        const currentValues = section.querySelectorAll('.current-value');
                         currentValues[0].textContent = `${lastUtilization}%`;
                         currentValues[1].textContent = `${lastMemory} MiB`;
 
-                        // Update charts with all historical data
-                        charts.utilization.data.labels = gpu.timestamps;
+                        // Update utilization chart
+                        charts.utilization.data.labels = formattedTimestamps;
                         charts.utilization.data.datasets[0].data = gpu.utilization;
+                        charts.utilization.options.scales.x = {
+                            ticks: {
+                                maxTicksLimit: 8,
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        };
                         charts.utilization.update();
 
-                        charts.memory.data.labels = gpu.timestamps;
+                        // Update memory chart with fixed y-axis
+                        charts.memory.data.labels = formattedTimestamps;
                         charts.memory.data.datasets[0].data = gpu.memory;
+                        charts.memory.options.scales = {
+                            x: {
+                            ticks: {
+                                maxTicksLimit: 8,
+                                maxRotation: 45,
+                                minRotation: 45
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                max: 25000,
+                                title: {
+                                    display: true,
+                                    text: 'Memory (MiB)'
+                                }
+                            }
+                        };
                         charts.memory.update();
+
+                        // Hide temperature chart for historical data
+                        if (charts.temperature) {
+                            const tempCard = section.querySelector('.stats-card:last-child');
+                            if (tempCard) {
+                                tempCard.style.display = 'none';
+                            }
+                        }
                     });
                 }
             } catch (error) {
@@ -297,16 +398,13 @@
                 if (response.ok) {
                     const container = document.getElementById('gpuStatsContainer');
                     
-                    // Initialize cards and charts for new GPUs
                     data.forEach(gpu => {
                         if (!document.querySelector(`[data-gpu="${gpu.index}"]`)) {
                             container.insertAdjacentHTML('beforeend', createGpuCards(gpu.index, gpu.name));
                             gpuCharts[gpu.index] = initializeCharts(gpu.index);
+                            addChartControls();
                         }
-                    });
 
-                    // Update data for each GPU
-                    data.forEach(gpu => {
                         const charts = gpuCharts[gpu.index];
                         const section = document.querySelector(`[data-gpu="${gpu.index}"]`);
                         
@@ -314,7 +412,7 @@
                         const currentValues = section.querySelectorAll('.current-value');
                         currentValues[0].textContent = `${gpu.gpu_util}%`;
                         currentValues[1].textContent = `${(gpu.mem_used / 1024).toFixed(1)}GB / ${(gpu.mem_total / 1024).toFixed(1)}GB`;
-                        currentValues[2].textContent = `${gpu.temperature}°C`;
+                        currentValues[2].textContent = `${gpu.temperature}&deg;C`;
 
                         // Update charts
                         const timestamp = new Date().toLocaleTimeString();
@@ -329,7 +427,7 @@
                         // Update memory chart
                         charts.memory.data.labels.push(timestamp);
                         charts.memory.data.labels.shift();
-                        charts.memory.data.datasets[0].data.push(gpu.mem_util);
+                        charts.memory.data.datasets[0].data.push(gpu.mem_used);
                         charts.memory.data.datasets[0].data.shift();
                         charts.memory.update();
 
@@ -380,6 +478,75 @@
         // Initialize with live data
         fetchGpuStats();
         updateInterval = setInterval(fetchGpuStats, 2000);
+
+        // Add download buttons to each chart container
+        function addChartControls() {
+            const chartContainers = document.querySelectorAll('.chart-container');
+            chartContainers.forEach(container => {
+                const controlsDiv = document.createElement('div');
+                controlsDiv.className = 'chart-controls';
+                
+                // Reset Zoom Button
+                const resetButton = document.createElement('button');
+                resetButton.className = 'chart-control-btn reset-zoom-btn';
+                resetButton.innerHTML = '<i class="fas fa-search-minus"></i> Reset Zoom';
+                resetButton.onclick = function() {
+                    const chartId = container.querySelector('canvas').id;
+                    const chart = Chart.getChart(chartId);
+                    if (chart) {
+                        chart.resetZoom();
+                    }
+                };
+
+                // Download Button
+                const downloadButton = document.createElement('button');
+                downloadButton.className = 'chart-control-btn download-btn';
+                downloadButton.innerHTML = '<i class="fas fa-download"></i> Download';
+                downloadButton.onclick = function() {
+                    const chartId = container.querySelector('canvas').id;
+                    const chart = Chart.getChart(chartId);
+                    if (chart) {
+                        // Create a temporary canvas for the download
+                        const tempCanvas = document.createElement('canvas');
+                        const tempCtx = tempCanvas.getContext('2d');
+                        
+                        // Set the temporary canvas size
+                        tempCanvas.width = chart.canvas.width;
+                        tempCanvas.height = chart.canvas.height;
+                        
+                        // Fill with white background
+                        tempCtx.fillStyle = 'white';
+                        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                        
+                        // Draw the chart
+                        tempCtx.drawImage(chart.canvas, 0, 0);
+                        
+                        // Create download link
+                        const link = document.createElement('a');
+                        link.download = `${chartId}_${new Date().toISOString().slice(0,10)}.png`;
+                        link.href = tempCanvas.toDataURL('image/png');
+                        link.click();
+                    }
+                };
+
+                controlsDiv.appendChild(resetButton);
+                controlsDiv.appendChild(downloadButton);
+                container.appendChild(controlsDiv);
+            });
+        }
+
+        async function fetchCustomDateRange() {
+            const start = document.getElementById('customStartDate').value;
+            const end = document.getElementById('customEndDate').value;
+            if (!start || !end) {
+                alert('Please select both start and end dates.');
+                return;
+            }
+            // Clear interval for live updates
+            if (updateInterval) clearInterval(updateInterval);
+            document.getElementById('refreshInfo').innerHTML = '<i class="fas fa-history"></i><span>Custom Date Range</span>';
+            await fetchHistoricalData('custom', start, end);
+        }
     </script>
 
     <style>
@@ -399,6 +566,44 @@
 
         .time-range-selector select:hover {
             border-color: #666;
+        }
+
+        /* Update styles for chart controls */
+        .chart-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+
+        .chart-control-btn {
+            padding: 8px 12px;
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .chart-control-btn:hover {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .chart-control-btn i {
+            font-size: 0.9rem;
+        }
+
+        .chart-container {
+            position: relative;
         }
     </style>
 </body>

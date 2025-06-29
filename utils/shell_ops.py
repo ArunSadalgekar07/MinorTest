@@ -186,83 +186,11 @@ def get_cpu_live_info():
     except Exception as e:
         return False, str(e)
 
-def get_user_cpu_usage():
-    try:
-        # More robust command for CPU usage by user
-        command = """
-        ps aux --no-headers | awk '
-        BEGIN {
-            PROCCOUNT=0
-            CPUSUM=0
-        }
-        {
-            if ($3 > 0.0) {  # Only count processes using CPU
-                CPUSUM[$1] += $3
-                PROCCOUNT[$1] += 1
-            }
-        }
-        END {
-            for (user in CPUSUM) {
-                if (user != "root" && user != "nobody" && user != "systemd+") {
-                    printf "%s %.2f\n", user, CPUSUM[user]
-                }
-            }
-        }' | sort -k2 -nr
-        """
-        
-        result = subprocess.run(
-            ['bash', '-c', command],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env={'LANG': 'C'}  # Ensure consistent output format
-        )
-        
-        if result.returncode != 0:
-            return False, result.stderr.strip()
-
-        # Parse the output
-        user_cpu_usage = []
-        for line in result.stdout.strip().split('\n'):
-            if line:
-                try:
-                    username, cpu_percent = line.split()
-                    user_cpu_usage.append({
-                        'username': username,
-                        'cpu_percent': float(cpu_percent)
-                    })
-                except (ValueError, IndexError) as e:
-                    continue  # Skip malformed lines
-                
-        return True, user_cpu_usage
-    except Exception as e:
-        return False, f"Error fetching user CPU usage: {str(e)}"
-
 def get_user_gpu_usage():
     try:
-        # More robust command for GPU usage by user
-        command = """
-        nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null | while read -r line; do
-            if [ ! -z "$line" ]; then
-                pid=$(echo $line | cut -d, -f1)
-                mem=$(echo $line | cut -d, -f2)
-                if [ -e "/proc/$pid" ]; then
-                    user=$(ps -o user= -p $pid 2>/dev/null)
-                    if [ ! -z "$user" ] && [ "$user" != "root" ]; then
-                        echo "$user $mem"
-                    fi
-                fi
-            fi
-        done | awk '
-        {
-            mem[$1] += $2
-        }
-        END {
-            for (user in mem) {
-                printf "%s %.0f\n", user, mem[user]
-            }
-        }' | sort -k2 -nr
-        """
+        # Query nvidia-smi for process information: PID, user, and used GPU memory
+        # Use --format=csv,noheader to get clean data
+        command = "nvidia-smi --query-compute-apps=pid,gpu_bus_id,gpu_name,used_memory --format=csv,noheader,nounits 2>/dev/null"
         
         result = subprocess.run(
             ['bash', '-c', command],
@@ -277,20 +205,66 @@ def get_user_gpu_usage():
             nvidia_check = subprocess.run(['which', 'nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if nvidia_check.returncode != 0:
                 return False, "nvidia-smi not found. Please ensure NVIDIA drivers are installed."
-            return False, result.stderr.strip()
+            
+            # Return the stderr for debugging if nvidia-smi is found but the command failed
+            return False, f"nvidia-smi command failed: {result.stderr.strip()}"
 
-        # Parse the output
-        user_gpu_usage = []
+        # Parse the CSV output
+        user_gpu_usage_raw = {}
+        MAX_GPU_MEMORY = 25000  # Maximum GPU memory in MiB (adjust if needed)
+        
         for line in result.stdout.strip().split('\n'):
             if line and not line.isspace():
                 try:
-                    username, gpu_memory = line.split()
-                    user_gpu_usage.append({
-                        'username': username,
-                        'gpu_memory_mib': float(gpu_memory)
-                    })
-                except (ValueError, IndexError) as e:
-                    continue  # Skip malformed lines
+                    # Expected CSV format: pid, gpu_bus_id, gpu_name, used_memory
+                    fields = line.split(',')
+                    if len(fields) == 4:
+                        pid = fields[0].strip()
+                        # gpu_bus_id = fields[1].strip()
+                        # gpu_name = fields[2].strip()
+                        used_memory_mib = int(fields[3].strip())
+
+                        # Get username for the PID
+                        user_result = subprocess.run(
+                            ['ps', '-o', 'user=', '-p', pid],  # Use ps to get the username
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                        
+                        if user_result.returncode == 0 and user_result.stdout.strip():
+                            username = user_result.stdout.strip()
+                            
+                            # Exclude root user
+                            if username != 'root':
+                                if username not in user_gpu_usage_raw:
+                                    user_gpu_usage_raw[username] = 0
+                                user_gpu_usage_raw[username] += used_memory_mib
+
+                except (ValueError, IndexError, subprocess.SubprocessError) as e:
+                    # Continue if a single line or process lookup fails
+                    continue
+
+        # Format the output and calculate percentages
+        user_gpu_usage = []
+        for username, total_memory_mib in user_gpu_usage_raw.items():
+             memory_percentage = (total_memory_mib / MAX_GPU_MEMORY) * 100
+             user_gpu_usage.append({
+                 'username': username,
+                 'gpu_memory_mib': total_memory_mib,
+                 'gpu_memory_percentage': round(memory_percentage, 2)
+             })
+
+        # Sort by GPU memory usage percentage descending
+        user_gpu_usage.sort(key=lambda x: x['gpu_memory_percentage'], reverse=True)
+
+        # If no non-root users found using GPU, return the default message
+        if not user_gpu_usage:
+             return True, [{
+                 'username': 'No GPU usage',
+                 'gpu_memory_mib': 0,
+                 'gpu_memory_percentage': 0
+             }]
 
         return True, user_gpu_usage
     except Exception as e:

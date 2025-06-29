@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AccessGrid Server Selection</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='server_list.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body class="server-list-body">
+    <div class="server-list-container">
+        <!-- GPU Status Button -->
+        <div class="gpu-status-button-container">
+            <a href="{{ url_for('status') }}" class="gpu-status-button">
+                <!-- <span class="gpu-status-icon">??</span> -->
+                <span class="gpu-status-text">GPU-STATUS</span>
+            </a>
+        </div>
+        
+        <div class="server-list-header">
+            <img src="{{ url_for('static', filename='images/accessgrid_official_logo.png') }}" alt="AccessGrid Logo" class="server-list-logo">
+            <h1 class="text-primary">Select Department Server</h1>
+            <p class="text-secondary">Choose your department server to proceed with login</p>
+        </div>
+        
+        <div class="server-buttons">
+            <div class="server-row">
+                <a href="http://172.16.0.27:5000/login" class="server-button">
+                    <span class="button-text">CS-1</span>
+                    <span class="button-description">Computer Science Server 1</span>
+                </a>
+                <a href="http://172.16.0.29:5000" class="server-button">
+                    <span class="button-text">CS-2</span>
+                    <span class="button-description">Computer Science Server 2</span>
+                </a>
+                <a href="http://172.16.0.26:5000" class="server-button">
+                    <span class="button-text">MECH</span>
+                    <span class="button-description">Mechanical Engineering Server</span>
+                </a>
+            </div>
+            <div class="server-row">
+                <a href="http://172.16.0.25:5000" class="server-button">
+                    <span class="button-text">EC</span>
+                    <span class="button-description">Electronics & Communication Server</span>
+                </a>
+                <a href="http://172.16.0.28:5000" class="server-button">
+                    <span class="button-text">CIVIL</span>
+                    <span class="button-description">Civil Engineering Server</span>
+                </a>
+                <a href="http://172.16.0.31:5000" class="server-button">
+                    <span class="button-text">ASUS</span>
+                    <span class="button-description">ASUS Server</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 

@@ -582,3 +582,85 @@
         justify-content: center;
     }
 }
+
+.custom-date-range {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 1rem;
+}
+
+.custom-date-range input[type="date"] {
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.custom-date-range button {
+    padding: 0.45rem 1.1rem;
+    border-radius: 6px;
+    border: none;
+    background: var(--primary-color);
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.custom-date-range button:hover {
+    background: var(--primary-gradient-end);
+}
+
+.download-csvs-btn {
+    background: linear-gradient(135deg, #198754, #43b36a);
+    color: #fff;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 25px;
+    margin-left: 1rem;
+    box-shadow: 0 4px 15px rgba(25, 135, 84, 0.18);
+    transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+}
+.download-csvs-btn:hover, .download-csvs-btn:focus {
+    background: linear-gradient(135deg, #157347, #198754);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(25, 135, 84, 0.28);
+    transform: translateY(-2px) scale(1.04);
+    text-decoration: underline;
+}
+
+.btn-csv-download-nav {
+    background: linear-gradient(135deg, #198754, #43b36a);
+    color: #fff;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-size: 0.98rem;
+    margin-right: 0.5rem;
+    box-shadow: 0 2px 8px rgba(25, 135, 84, 0.10);
+    transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    height: 36px;
+}
+.btn-csv-download-nav i {
+    font-size: 1.05em;
+}
+.btn-csv-download-nav:hover, .btn-csv-download-nav:focus {
+    background: linear-gradient(135deg, #157347, #198754);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(25, 135, 84, 0.18);
+    transform: translateY(-1px) scale(1.03);
+    text-decoration: underline;
+}

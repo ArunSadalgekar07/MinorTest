@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AccessGrid GPU Status</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='status.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body class="server-list-body">
+    <div class="status-container">
+        <a href="{{ url_for('server_list') }}" class="back-button">Back</a>
+        <div class="status-header">
+            <h1>All Workstations GPU Status</h1>
+            <p>Live status of all GPUs across all department servers</p>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="legend-color legend-green"></span> Working</div>
+            <div class="legend-item"><span class="legend-color legend-red"></span> Error</div>
+            <div class="legend-item"><span class="legend-color legend-grey"></span> Unreachable</div>
+        </div>
+        <div id="gpu-status-grid" class="gpu-status-grid">
+            <div class="loading">Loading GPU statuses...</div>
+        </div>
+    </div>
+    <script>
+        function renderGrid(data) {
+            let html = '';
+            // Header row
+            html += '<div class="grid-row grid-header">';
+            data.forEach(ws => {
+                html += `<div class="grid-cell grid-header-cell">${ws.name}</div>`;
+            });
+            html += '</div>';
+            // 3 rows for 3 GPUs
+            for (let gpuIdx = 0; gpuIdx < 3; gpuIdx++) {
+                html += '<div class="grid-row">';
+                data.forEach(ws => {
+                    const cell = ws.gpus[gpuIdx];
+                    let cellClass = 'grid-cell ';
+                    if (!ws.reachable) cellClass += 'gpu-grey';
+                    else if (cell.status === 'green') cellClass += 'gpu-green';
+                    else if (cell.status === 'red') cellClass += 'gpu-red';
+                    else cellClass += 'gpu-grey';
+                    let gpuInfo = '';
+                    if (cell.gpu) {
+                        gpuInfo = `<div class='gpu-label'>GPU ${cell.gpu.index}</div>` +
+                                  `<div class='gpu-info'>Util: ${cell.gpu.gpu_util ?? 'N/A'}%</div>` +
+                                  `<div class='gpu-temp'>Temp: ${cell.gpu.temperature ?? 'N/A'}&deg;C</div>`;
+                    } else {
+                        gpuInfo = `<div class='gpu-label'>GPU ${gpuIdx}</div><div class='gpu-info'>N/A</div>`;
+                    }
+                    html += `<div class="${cellClass}">${gpuInfo}</div>`;
+                });
+                html += '</div>';
+            }
+            document.getElementById('gpu-status-grid').innerHTML = html;
+        }
+        function loadAllGPUStatus() {
+            fetch('/api/all_gpu_status')
+                .then(r => r.json())
+                .then(data => renderGrid(data))
+                .catch(_ => {
+                    document.getElementById('gpu-status-grid').innerHTML = '<div class="error-message">Failed to load GPU statuses.</div>';
+                });
+        }
+        loadAllGPUStatus();
+        setInterval(loadAllGPUStatus, 30000);
+    </script>
+</body>
+</html>

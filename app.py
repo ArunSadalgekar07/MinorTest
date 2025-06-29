@@ -1,18 +1,32 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from utils.shell_ops import create_user, delete_user, list_users, get_inactive_users, get_gpu_stats, get_cpu_live_info, get_user_cpu_usage, get_user_gpu_usage  # Add new imports
+import os
+from dotenv import load_dotenv
+load_dotenv()  # This will load variables from a .env file if present
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory
+from utils.shell_ops import create_user, delete_user, list_users, get_inactive_users, get_gpu_stats, get_cpu_live_info, get_user_gpu_usage  # Add new imports
 import pandas as pd
 from io import StringIO
 from datetime import datetime, timedelta
-from utils.db import insert_gpu_log, get_recent_gpu_logs
+from utils.db import insert_gpu_log, get_recent_gpu_logs, get_recent_user_gpu_logs
+import requests
+import glob
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Required for session
+app.config['JSON_AS_ASCII'] = False  # Ensure proper JSON encoding
+app.config['TEMPLATES_AUTO_RELOAD'] = True  # Auto reload templates
 
-# Login Page
-@app.route('/', methods=['GET', 'POST'])
+# Server List Page (New Root Route)
+@app.route('/')
+def root():
+    return redirect(url_for('login'))
+
+# Login Page 
+@app.route('/login', methods=['GET', 'POST'])
 def login():
+    admin_user = os.environ.get('ACCESSGRID_ADMIN_USER', 'admin')
+    admin_pass = os.environ.get('ACCESSGRID_ADMIN_PASS', 'admin')
     if request.method == 'POST':
-        if request.form['username'] == 'admin' and request.form['password'] == 'admin':
+        if request.form['username'] == admin_user and request.form['password'] == admin_pass:
             session['logged_in'] = True
             return redirect(url_for('display'))  # Redirect to the display page
         else:
@@ -25,6 +39,8 @@ def dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     return render_template('dashboard.html')
+
+
 
 # List Users Page
 @app.route('/search_user', methods=['GET', 'POST'])
@@ -118,8 +134,8 @@ def inactive_users_route():
 
 @app.route('/api/gpu_stats')
 def gpu_stats():
-    if not session.get('logged_in'):
-        return jsonify({"error": "Unauthorized"}), 401
+    # if not session.get('logged_in'):
+    #     return jsonify({"error": "Unauthorized"}), 401
 
     success, gpu_data = get_gpu_stats()
     if success:
@@ -192,26 +208,10 @@ def cpu_live_info():
     else:
         return jsonify({'error': data}), 500
 
-@app.route('/api/user_cpu_usage')
-def user_cpu_usage():
-    if not session.get('logged_in'):
-        return jsonify({"error": "Unauthorized"}), 401
-
-    success, data = get_user_cpu_usage()
-    if success:
-        if not data:  # If no users are using CPU
-            return jsonify([{
-                'username': 'No active users',
-                'cpu_percent': 0
-            }])
-        return jsonify(data)
-    else:
-        return jsonify({"error": data}), 500
-
 @app.route('/api/user_gpu_usage')
 def user_gpu_usage():
-    if not session.get('logged_in'):
-        return jsonify({"error": "Unauthorized"}), 401
+    # if not session.get('logged_in'):
+    #     return jsonify({"error": "Unauthorized"}), 401
 
     success, data = get_user_gpu_usage()
     if success:
@@ -240,21 +240,26 @@ def historical_gpu_stats():
     if not session.get('logged_in'):
         return jsonify({"error": "Unauthorized"}), 401
     
-    time_range = request.args.get('range', 'daily')  # daily, weekly, monthly
-    
-    # Convert time range to hours
-    hours = {
-        'daily': 24,
-        'weekly': 24 * 7,
-        'monthly': 24 * 30
-    }.get(time_range)
-    
-    if not hours:
-        return jsonify({"error": "Invalid time range"}), 400
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    time_range = request.args.get('range', 'daily')  # daily, weekly, monthly, custom
     
     try:
-        # Get historical data from SQLite
-        logs = get_recent_gpu_logs(hours=hours)
+        if time_range == 'custom' and start_date and end_date:
+            logs = get_recent_gpu_logs(start_date=start_date, end_date=end_date)
+        else:
+            # Convert time range to hours
+            hours = {
+                'daily': 24,
+                'weekly': 24 * 7,
+                'monthly': 24 * 30
+            }.get(time_range)
+            
+            if not hours:
+                return jsonify({"error": "Invalid time range"}), 400
+            
+            # Get historical data from SQLite
+            logs = get_recent_gpu_logs(hours=hours)
         
         # Process the data
         gpu_data = {}
@@ -275,6 +280,49 @@ def historical_gpu_stats():
             gpu_data[gpu_index]['memory'].append(memory)
         
         return jsonify(list(gpu_data.values()))
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/historical_user_gpu_usage')
+def historical_user_gpu_usage():
+    if not session.get('logged_in'):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    time_range = request.args.get('range', 'daily')  # daily, weekly, monthly
+    
+    # Convert time range to hours
+    hours = {
+        'daily': 24,
+        'weekly': 24 * 7,
+        'monthly': 24 * 30
+    }.get(time_range)
+    
+    if not hours:
+        return jsonify({"error": "Invalid time range"}), 400
+    
+    try:
+        # Get historical user GPU usage data from SQLite
+        logs = get_recent_user_gpu_logs(hours=hours)
+        
+        # Process the data
+        user_data = {}
+        for log in logs:
+            username, gpu_memory_mib, gpu_memory_percentage, timestamp = log
+            
+            if username not in user_data:
+                user_data[username] = {
+                    'username': username,
+                    'timestamps': [],
+                    'gpu_memory_mib': [],
+                    'gpu_memory_percentage': []
+                }
+            
+            user_data[username]['timestamps'].append(timestamp)
+            user_data[username]['gpu_memory_mib'].append(gpu_memory_mib)
+            user_data[username]['gpu_memory_percentage'].append(gpu_memory_percentage)
+        
+        return jsonify(list(user_data.values()))
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -284,6 +332,120 @@ def historical_gpu_stats():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+@app.route('/api/gpu_status')
+def gpu_status():
+    """Check GPU status for server list page"""
+    try:
+        success, gpu_data = get_gpu_stats()
+        if success and isinstance(gpu_data, list):
+            gpu_count = len(gpu_data)
+            if gpu_count == 0:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No GPUs found',
+                    'gpu_count': 0,
+                    'gpu_details': []
+                })
+            # Always return up to 3 GPUs, filling missing with None
+            gpu_details = gpu_data.copy()
+            while len(gpu_details) < 3:
+                gpu_details.append({
+                    'index': len(gpu_details),
+                    'name': None,
+                    'gpu_util': None,
+                    'mem_util': None,
+                    'mem_total': None,
+                    'mem_used': None,
+                    'mem_free': None,
+                    'temperature': None
+                })
+            all_working = all(
+                gpu.get('gpu_util') is not None and 
+                gpu.get('mem_used') is not None and 
+                gpu.get('temperature') is not None
+                for gpu in gpu_data
+            )
+            working_gpus = len([gpu for gpu in gpu_data if gpu.get('gpu_util') is not None])
+            return jsonify({
+                'status': 'working' if all_working and gpu_count == 3 else 'partial',
+                'gpu_count': gpu_count,
+                'working_gpus': working_gpus,
+                'gpu_details': gpu_details
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': gpu_data if isinstance(gpu_data, str) else 'Failed to get GPU stats',
+                'gpu_count': 0,
+                'gpu_details': []
+            })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Error checking GPU status: {str(e)}',
+            'gpu_count': 0,
+            'gpu_details': []
+        }), 500
+
+# Workstation info for GPU status aggregation
+WORKSTATIONS = [
+    {"name": "CS-1",   "url": "http://172.16.0.27:5000/api/gpu_status"},
+    {"name": "CS-2",   "url": "http://172.16.0.29:5000/api/gpu_status"},
+    {"name": "MECH",   "url": "http://172.16.0.26:5000/api/gpu_status"},
+    {"name": "EC",     "url": "http://172.16.0.25:5000/api/gpu_status"},
+    {"name": "CIVIL",  "url": "http://172.16.0.28:5000/api/gpu_status"},
+    {"name": "ASUS",   "url": "http://172.16.0.31:5000/api/gpu_status"},
+]
+
+@app.route('/api/all_gpu_status')
+def all_gpu_status():
+    results = []
+    for ws in WORKSTATIONS:
+        ws_result = {"name": ws["name"], "gpus": [], "reachable": True}
+        try:
+            resp = requests.get(ws["url"], timeout=2)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("gpu_details") and isinstance(data["gpu_details"], list):
+                    for gpu in data["gpu_details"]:
+                        # Determine status: green (working), red (error)
+                        is_working = (
+                            gpu.get("gpu_util") is not None and
+                            gpu.get("mem_used") is not None and
+                            gpu.get("temperature") is not None
+                        )
+                        ws_result["gpus"].append({
+                            "status": "green" if is_working else "red",
+                            "gpu": gpu
+                        })
+                    # If less than 3 GPUs, fill with red
+                    while len(ws_result["gpus"]) < 3:
+                        ws_result["gpus"].append({"status": "red", "gpu": None})
+                else:
+                    # No GPU details, mark all as red
+                    ws_result["gpus"] = [{"status": "red", "gpu": None} for _ in range(3)]
+            else:
+                ws_result["reachable"] = False
+                ws_result["gpus"] = [{"status": "grey", "gpu": None} for _ in range(3)]
+        except Exception:
+            ws_result["reachable"] = False
+            ws_result["gpus"] = [{"status": "grey", "gpu": None} for _ in range(3)]
+        results.append(ws_result)
+    return jsonify(results)
+
+@app.route('/download_csvs')
+def download_csvs():
+    log_dir = os.path.join(os.getcwd(), 'GPU_Usage_Logs')
+    csv_files = []
+    if os.path.exists(log_dir):
+        csv_files = [os.path.basename(f) for f in glob.glob(os.path.join(log_dir, '*.csv'))]
+    return render_template('download_csvs.html', csv_files=csv_files)
+
+@app.route('/download_csv/<filename>')
+def download_csv_file(filename):
+    log_dir = os.path.join(os.getcwd(), 'GPU_Usage_Logs')
+    return send_from_directory(log_dir, filename, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
